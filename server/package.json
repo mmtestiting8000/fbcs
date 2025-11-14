@@ -2,7 +2,7 @@
   "name": "fb-scraper-server",
   "version": "1.0.0",
   "main": "server.js",
-  "type": "module",      <--- esta línea
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
