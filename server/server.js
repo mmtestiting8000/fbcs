@@ -7,8 +7,13 @@ import session from 'express-session';
 import cookieParser from 'cookie-parser';
 import { stringify } from 'csv-stringify/sync';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -20,6 +25,12 @@ app.use(session({
   saveUninitialized: true,
   cookie: { secure: false }
 }));
+
+// Servir frontend estático
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGODB_URI;
@@ -56,7 +67,7 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ ok: false, message: 'No autorizado' });
 }
 
-// Ruta para ejecutar el scraper
+// Ejecutar scraper
 app.post('/api/scrape', requireAuth, async (req, res) => {
   try {
     const { facebookUrl, commentsCount, apifyToken } = req.body;
@@ -101,15 +112,12 @@ app.post('/api/scrape', requireAuth, async (req, res) => {
       }
     }
 
-    const normalized = [];
-    for (const it of items) {
-      normalized.push({
-        postTitle: it.postTitle || it.post_title || it.title || '',
-        text: it.text || it.comment || it.message || '',
-        likesCount: String(it.likesCount ?? it.likes ?? it.reactions ?? 0),
-        facebookUrl: it.facebookUrl || it.postUrl || facebookUrl
-      });
-    }
+    const normalized = items.map(it => ({
+      postTitle: it.postTitle || it.post_title || it.title || '',
+      text: it.text || it.comment || it.message || '',
+      likesCount: String(it.likesCount ?? it.likes ?? it.reactions ?? 0),
+      facebookUrl: it.facebookUrl || it.postUrl || facebookUrl
+    }));
 
     const doc = {
       createdAt: new Date(),
@@ -149,8 +157,6 @@ app.get('/api/export-csv', requireAuth, async (req, res) => {
 });
 
 // Iniciar servidor
-connectDb().then(() => {
-  app.listen(PORT, () => console.log(`Server escuchando en http://localhost:${PORT}`));
-}).catch(err => {
-  console.error('No se pudo conectar con DB', err);
-});
+connectDb()
+  .then(() => app.listen(PORT, () => console.log(`Server escuchando en http://localhost:${PORT}`)))
+  .catch(err => console.error('No se pudo conectar con DB', err));
