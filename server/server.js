@@ -77,8 +77,8 @@ app.post('/api/scrape', requireAuth, async (req, res) => {
     if (!token) return res.status(400).json({ ok: false, message: 'No hay token de Apify disponible' });
 
     const input = {
-      postUrls: [facebookUrl],
-      comments: Number(commentsCount) || 50
+      startUrls: [{ url: facebookUrl }],
+      maxComments: Number(commentsCount) || 50
     };
 
     const actorId = 'apify~facebook-comments-scraper';
