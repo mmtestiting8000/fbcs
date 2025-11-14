@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FB Scraper</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    input, button { margin: 5px 0; padding: 5px; width: 100%; max-width: 400px; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; max-width: 800px; }
+    th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Facebook Comments Scraper</h1>
+
+  <div id="login-section">
+    <h2>Login Admin</h2>
+    <input type="text" id="username" placeholder="Usuario">
+    <input type="password" id="password" placeholder="Contraseña">
+    <button id="login-btn">Login</button>
+    <p id="login-msg" style="color:red;"></p>
+  </div>
+
+  <div id="scraper-section" style="display:none;">
+    <h2>Ejecutar Scraper</h2>
+    <input type="text" id="facebookUrl" placeholder="Enlace de Facebook">
+    <input type="number" id="commentsCount" placeholder="Número de comentarios" value="50">
+    <input type="text" id="apifyToken" placeholder="Token Apify (opcional)">
+    <button id="scrape-btn">Scrapear</button>
+    <p id="scrape-msg" style="color:green;"></p>
+
+    <h3>Última instancia</h3>
+    <button id="export-btn">Exportar CSV</button>
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>Post Title</th>
+          <th>Texto</th>
+          <th>Likes</th>
+          <th>Facebook URL</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
