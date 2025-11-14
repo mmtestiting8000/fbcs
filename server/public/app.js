@@ -8,6 +8,7 @@ const scrapeMsg = document.getElementById('scrape-msg');
 const exportBtn = document.getElementById('export-btn');
 const resultsTableBody = document.querySelector('#results-table tbody');
 
+// --- Login ---
 loginBtn.addEventListener('click', async () => {
   const username = document.getElementById('username').value;
   const password = document.getElementById('password').value;
@@ -17,6 +18,7 @@ loginBtn.addEventListener('click', async () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password })
   });
+
   const data = await res.json();
   if (data.ok) {
     loginSection.style.display = 'none';
@@ -27,31 +29,46 @@ loginBtn.addEventListener('click', async () => {
   }
 });
 
+// --- Ejecutar Scraper ---
 scrapeBtn.addEventListener('click', async () => {
+  scrapeMsg.style.color = 'green';
   scrapeMsg.textContent = '';
+  
   const facebookUrl = document.getElementById('facebookUrl').value;
   const commentsCount = document.getElementById('commentsCount').value;
   const apifyToken = document.getElementById('apifyToken').value;
 
-  const res = await fetch('/api/scrape', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ facebookUrl, commentsCount, apifyToken })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    scrapeMsg.textContent = 'Scrape completado!';
-    renderTable(data.normalized);
-  } else {
+  try {
+    const res = await fetch('/api/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ facebookUrl, commentsCount, apifyToken })
+    });
+
+    const data = await res.json();
+
+    if (data.ok) {
+      scrapeMsg.textContent = 'Scrape completado!';
+      renderTable(data.normalized);
+    } else {
+      // Mostrar detalle del error
+      scrapeMsg.style.color = 'red';
+      console.error('Error de Apify:', data.detail || data.message);
+      scrapeMsg.textContent = `Error al ejecutar actor: ${data.detail || data.message}`;
+    }
+  } catch (err) {
     scrapeMsg.style.color = 'red';
-    scrapeMsg.textContent = data.message || 'Error al scrapear';
+    console.error('Error inesperado:', err);
+    scrapeMsg.textContent = `Error inesperado: ${err.message}`;
   }
 });
 
+// --- Exportar CSV ---
 exportBtn.addEventListener('click', () => {
   window.location.href = '/api/export-csv';
 });
 
+// --- Cargar última instancia ---
 async function loadLatest() {
   const res = await fetch('/api/latest');
   const data = await res.json();
@@ -60,6 +77,7 @@ async function loadLatest() {
   }
 }
 
+// --- Renderizar tabla ---
 function renderTable(items) {
   resultsTableBody.innerHTML = '';
   items.forEach(it => {
