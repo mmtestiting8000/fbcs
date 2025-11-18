@@ -19,7 +19,30 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------------------
-// MONGO CONNECTION (con fallback)
+// LOGIN ADMIN
+// ---------------------------
+
+// Si no existen variables en Render, se usan valores de prueba.
+// Puedes cambiarlos en "Environment Variables" de Render.
+const ADMIN_USER = process.env.ADMIN_USER || "admin";
+const ADMIN_PASS = process.env.ADMIN_PASS || "1234";
+
+app.post("/api/login", (req, res) => {
+    const { username, password } = req.body;
+
+    console.log("🔐 Intento de login:", username);
+
+    if (username === ADMIN_USER && password === ADMIN_PASS) {
+        console.log("✔️ Login correcto");
+        return res.json({ ok: true });
+    }
+
+    console.log("❌ Login inválido");
+    return res.json({ ok: false, message: "Usuario o contraseña incorrectos" });
+});
+
+// ---------------------------
+// MONGO CONNECTION
 // ---------------------------
 let collection = null;
 let mongoConnected = false;
@@ -61,14 +84,17 @@ app.post("/api/scrape", async (req, res) => {
     try {
         console.log("🔵 Ejecutando actor Apify con token:", token);
 
-        const run = await fetch(`https://api.apify.com/v2/actor-tasks/FB-COMMENTS-SCRAPER/run-sync?token=${token}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                startUrls: [{ url: facebookUrl }],
-                maxComments: Number(commentsCount) || 50
-            })
-        });
+        const run = await fetch(
+            `https://api.apify.com/v2/actor-tasks/FB-COMMENTS-SCRAPER/run-sync?token=${token}`,
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    startUrls: [{ url: facebookUrl }],
+                    maxComments: Number(commentsCount) || 50
+                })
+            }
+        );
 
         console.log("📡 Respuesta Apify status:", run.status);
 
