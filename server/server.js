@@ -1,175 +1,162 @@
-import express from "express";
-import session from "express-session";
-import cors from "cors";
-import dotenv from "dotenv";
-import fetch from "node-fetch";
-import { MongoClient } from "mongodb";
-import path from "path";
-import { fileURLToPath } from "url";
-import { stringify } from "csv-stringify/sync";
+import express from 'express';
+import fetch from 'node-fetch';
+import { MongoClient } from 'mongodb';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import session from 'express-session';
+import cookieParser from 'cookie-parser';
+import { stringify } from 'csv-stringify/sync';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-app.use(
-  session({
-    secret: "supersecret-session",
-    resave: false,
-    saveUninitialized: true,
-  })
-);
-
-// ------------------------------
-// SERVIR FRONTEND
-// ------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, "public")));
 
-// ------------------------------
-// LOGIN
-// ------------------------------
-function requireAuth(req, res, next) {
-  if (req.session && req.session.user === "admin") return next();
-  return res.status(401).json({ ok: false, message: "No autorizado" });
-}
+const app = express();
+app.use(cors({ origin: true, credentials: true }));
+app.use(bodyParser.json());
+app.use(cookieParser());
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'change_this',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false }
+}));
 
-app.post("/api/login", (req, res) => {
-  const { username, password } = req.body;
-  if (username === "admin" && password === "Cortes0202") {
-    req.session.user = "admin";
-    return res.json({ ok: true });
-  }
-  return res.json({ ok: false, message: "Credenciales incorrectas" });
+// Servir frontend estático
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ------------------------------
-// MONGODB
-// ------------------------------
+const PORT = process.env.PORT || 3000;
+const MONGO_URI = process.env.MONGODB_URI;
+const APIFY_TOKEN_DEFAULT = process.env.APIFY_TOKEN_DEFAULT || '';
+
+if (!MONGO_URI) {
+  console.error('MONGODB_URI no definido en variables de entorno');
+  process.exit(1);
+}
+
+let mongoClient;
 let commentsCollection;
 
 async function connectDb() {
-  const uri = process.env.MONGODB_URI;
-
-  if (!uri) throw new Error("MONGODB_URI no está configurado");
-
-  const client = new MongoClient(uri);
-  await client.connect();
-  const db = client.db("fb_scraper");
-  commentsCollection = db.collection("comments");
-  console.log("Conectado a MongoDB");
+  mongoClient = new MongoClient(MONGO_URI);
+  await mongoClient.connect();
+  const db = mongoClient.db();
+  commentsCollection = db.collection('comments');
+  console.log('Conectado a MongoDB');
 }
 
-// ------------------------------
-// SCRAPER
-// ------------------------------
-app.post("/api/scrape", requireAuth, async (req, res) => {
-  const { facebookUrl, commentsCount, apifyToken } = req.body;
-
-  const token = apifyToken?.trim() !== "" ? apifyToken : process.env.APIFY_DEFAULT_TOKEN;
-
-  if (!token) {
-    return res.status(400).json({
-      ok: false,
-      message: "No hay token de Apify definido",
-    });
+// LOGIN simple
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === 'admin' && password === 'Cortes0202') {
+    req.session.user = { username };
+    return res.json({ ok: true });
   }
+  return res.status(401).json({ ok: false, message: 'Credenciales inválidas' });
+});
 
+function requireAuth(req, res, next) {
+  if (req.session && req.session.user && req.session.user.username === 'admin') return next();
+  return res.status(401).json({ ok: false, message: 'No autorizado' });
+}
+
+// Ejecutar scraper
+app.post('/api/scrape', requireAuth, async (req, res) => {
   try {
-    const actorId = "apify/facebook-comments-scraper";
+    const { facebookUrl, commentsCount, apifyToken } = req.body;
+    if (!facebookUrl) return res.status(400).json({ ok: false, message: 'facebookUrl requerido' });
 
-    // INPUT corregido
+    const token = apifyToken && apifyToken.trim() !== '' ? apifyToken.trim() : APIFY_TOKEN_DEFAULT;
+    if (!token) return res.status(400).json({ ok: false, message: 'No hay token de Apify disponible' });
+
     const input = {
-      startUrls: [{ url: facebookUrl }],
-      maxComments: Number(commentsCount) || 50
+      postUrls: [facebookUrl],
+      comments: Number(commentsCount) || 50
     };
 
-    // Ejecutar actor
-    const runResp = await fetch(
-      `https://api.apify.com/v2/acts/${actorId}/runs?token=${encodeURIComponent(token)}&waitForFinish=1`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input }),
-      }
-    );
+    const actorId = 'apify~facebook-comments-scraper';
+    const runSyncUrl = `https://api.apify.com/v2/acts/${actorId}/run-sync?token=${encodeURIComponent(token)}`;
+
+    const runResp = await fetch(runSyncUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input)
+    });
 
     if (!runResp.ok) {
       const txt = await runResp.text();
-      console.error("Error Apify:", txt);
-      return res.status(502).json({ ok: false, detail: txt });
+      return res.status(502).json({ ok: false, message: 'Error al ejecutar actor', detail: txt });
     }
 
-    const runData = await runResp.json();
+    const runOutput = await runResp.json();
 
-    // Extraer dataset
-    const datasetId = runData.data?.defaultDatasetId;
-    if (!datasetId) {
-      return res.status(502).json({ ok: false, detail: "Dataset no encontrado" });
+    let items = [];
+    if (Array.isArray(runOutput)) items = runOutput;
+    else if (Array.isArray(runOutput.items)) items = runOutput.items;
+    else if (Array.isArray(runOutput.output)) items = runOutput.output;
+    else if (runOutput && runOutput.content && Array.isArray(runOutput.content)) items = runOutput.content;
+    else {
+      try {
+        const actorPrefix = `https://api.apify.com/v2/acts/${actorId}/runs/last/dataset/items?token=${encodeURIComponent(token)}`;
+        const ds = await fetch(actorPrefix);
+        if (ds.ok) items = await ds.json();
+      } catch (e) {
+        console.warn('No se pudo obtener dataset via /runs/last/dataset/items', e.message);
+      }
     }
 
-    const itemsResp = await fetch(
-      `https://api.apify.com/v2/datasets/${datasetId}/items?token=${encodeURIComponent(token)}`
-    );
-
-    const items = await itemsResp.json();
-
-    // Normalizar
     const normalized = items.map(it => ({
-      postTitle: it.postTitle || "",
-      text: it.text || "",
-      likesCount: String(it.likesCount ?? 0),
-      facebookUrl
+      postTitle: it.postTitle || it.post_title || it.title || '',
+      text: it.text || it.comment || it.message || '',
+      likesCount: String(it.likesCount ?? it.likes ?? it.reactions ?? 0),
+      facebookUrl: it.facebookUrl || it.postUrl || facebookUrl
     }));
 
-    // Guardar en Mongo
-    await commentsCollection.insertOne({
+    const doc = {
       createdAt: new Date(),
       facebookUrl,
-      commentsCount: normalized.length,
+      commentsCount: Number(commentsCount) || normalized.length,
+      apifyTokenUsed: token ? 'provided' : 'none',
       rawItems: items,
       normalized
-    });
+    };
+
+    await commentsCollection.insertOne(doc);
 
     return res.json({ ok: true, normalized });
 
   } catch (err) {
-    console.error("Error interno:", err);
-    return res.status(500).json({ ok: false, message: "Error interno", detail: err.message });
+    console.error(err);
+    return res.status(500).json({ ok: false, message: 'Error interno', error: err.message });
   }
 });
 
-// ------------------------------
-// OBTENER ÚLTIMA INSTANCIA
-// ------------------------------
-app.get("/api/latest", requireAuth, async (req, res) => {
+// Última instancia
+app.get('/api/latest', requireAuth, async (req, res) => {
   const last = await commentsCollection.find().sort({ createdAt: -1 }).limit(1).toArray();
-  if (!last.length) return res.json({ ok: true, normalized: [] });
-
-  return res.json({ ok: true, normalized: last[0].normalized });
+  if (!last || last.length === 0) return res.json({ ok: true, normalized: [] });
+  return res.json({ ok: true, normalized: last[0].normalized, createdAt: last[0].createdAt });
 });
 
-// ------------------------------
-// EXPORTAR CSV
-// ------------------------------
-app.get("/api/export-csv", requireAuth, async (req, res) => {
+// Exportar CSV
+app.get('/api/export-csv', requireAuth, async (req, res) => {
   const last = await commentsCollection.find().sort({ createdAt: -1 }).limit(1).toArray();
-  if (!last.length) return res.status(404).send("Sin datos");
-
-  const csv = stringify(last[0].normalized, { header: true });
-
-  res.setHeader("Content-Disposition", "attachment; filename=latest_comments.csv");
-  res.setHeader("Content-Type", "text/csv");
+  if (!last || last.length === 0) return res.status(404).send('No hay datos para exportar');
+  const rows = last[0].normalized || [];
+  const csv = stringify(rows, { header: true });
+  res.setHeader('Content-disposition', 'attachment; filename=latest_comments.csv');
+  res.setHeader('Content-Type', 'text/csv');
   res.send(csv);
 });
 
-// ------------------------------
-// INICIAR SERVIDOR
-// ------------------------------
-connectDb().then(() => {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => console.log("Servidor listo en puerto", PORT));
-});
+// Iniciar servidor
+connectDb()
+  .then(() => app.listen(PORT, () => console.log(`Server escuchando en http://localhost:${PORT}`)))
+  .catch(err => console.error('No se pudo conectar con DB', err));
