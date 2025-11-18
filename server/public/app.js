@@ -1,4 +1,4 @@
-// Simple UI interactions + validations
+// ui + validations + calls
 const loginSection = document.getElementById("login-section");
 const scraperSection = document.getElementById("scraper-section");
 const loginMsg = document.getElementById("login-msg");
@@ -61,7 +61,7 @@ document.getElementById("scrape-btn").addEventListener("click", async () => {
 
   try {
     const body = {
-      facebookUrl,
+      startUrls: [{ url: facebookUrl }],
       resultsLimit,
       includeNestedComments,
       viewOption,
@@ -100,7 +100,7 @@ async function loadLatest() {
   } catch (err) { console.warn("Error loading latest:", err); }
 }
 
-// export CSV button
+// export CSV
 document.getElementById("export-btn").addEventListener("click", () => {
   window.location.href = "/api/export-csv";
 });
