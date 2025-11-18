@@ -9,12 +9,12 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
-// -------------------- config --------------------
+// ---------- config ----------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
-const ACTOR_ID = process.env.ACTOR_ID || "us5srxAYnsrkgUv2v"; // your actor id
+const ACTOR_ID = process.env.ACTOR_ID || "apify~facebook-comments-scraper";
 const APIFY_TOKEN_DEFAULT = process.env.APIFY_TOKEN_DEFAULT || "";
 const MONGODB_URI = process.env.MONGODB_URI || "";
 const DB_NAME = process.env.DB_NAME || "fb_scraper";
@@ -23,7 +23,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "change_this";
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASS || "Cortes0202";
 
-// -------------------- app --------------------
+// ---------- app ----------
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -39,7 +39,7 @@ app.use(
 // serve static frontend
 app.use(express.static(path.join(__dirname, "public")));
 
-// -------------------- mongo (optional, non-fatal) --------------------
+// ---------- mongo (optional non-fatal) ----------
 let mongoClient = null;
 let commentsCollection = null;
 let mongoConnected = false;
@@ -63,7 +63,7 @@ async function tryConnectMongo() {
 }
 await tryConnectMongo();
 
-// -------------------- helpers --------------------
+// ---------- helpers ----------
 function isValidHttpUrl(str) {
   try {
     const u = new URL(str);
@@ -78,14 +78,15 @@ function normalizeItem(i, fallbackUrl) {
     postTitle: i?.postTitle ?? i?.post_title ?? i?.title ?? "",
     text: i?.text ?? i?.comment ?? i?.message ?? "",
     likesCount: String(i?.likesCount ?? i?.likes ?? i?.reactions ?? 0),
-    facebookUrl: i?.facebookUrl ?? i?.facebook_url ?? i?.url ?? fallbackUrl ?? "",
+    facebookUrl:
+      i?.facebookUrl ?? i?.facebook_url ?? i?.postUrl ?? i?.url ?? fallbackUrl ?? "",
   };
 }
 
-// Keep last result in memory as fallback when Mongo isn't available
+// keep last result in memory if mongo is not available
 let LAST_NORMALIZED = [];
 
-// -------------------- auth --------------------
+// ---------- auth ----------
 app.post("/api/login", (req, res) => {
   const { username, password } = req.body;
   console.log("🔐 Login attempt:", username);
@@ -103,116 +104,105 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ ok: false, message: "No autorizado" });
 }
 
-// -------------------- scrape endpoint --------------------
+// ---------- scrape endpoint (uses run-sync-get-dataset-items) ----------
 app.post("/api/scrape", requireAuth, async (req, res) => {
   const input = req.body || {};
   console.log("📥 /api/scrape called with:", input);
 
-  const facebookUrl = input.facebookUrl || input.startUrl || "";
-  const resultsLimit = Number(input.resultsLimit ?? input.resultsLimit ?? input.resultsLimit ?? input.resultsLimit) || Number(input.resultsLimit) || Number(input.resultsLimit) || Number(input.resultsLimit) || Number(input.resultsLimit) || Number(input.commentsCount) || 50;
-  // We accept either resultsLimit or commentsCount (backwards compat). Prefer resultsLimit.
-  const token = (input.apifyToken && String(input.apifyToken).trim()) || APIFY_TOKEN_DEFAULT;
-  const includeNestedComments = !!input.includeNestedComments;
+  const facebookUrl = (input.startUrls && input.startUrls[0]?.url) || input.facebookUrl || "";
+  // Accept both resultsLimit (preferred) or backwards-compatible commentsCount
+  const resultsLimit = Number(input.resultsLimit ?? input.resultsLimit) || Number(input.commentsCount) || 50;
+  const includeNestedComments = input.includeNestedComments === true || input.includeNestedComments === "true";
   const viewOption = input.viewOption || "RANKED_UNFILTERED";
+  const token = (input.apifyToken && String(input.apifyToken).trim()) || APIFY_TOKEN_DEFAULT;
 
-  // Validate
+  // validations
   if (!facebookUrl || !isValidHttpUrl(facebookUrl)) {
     return res.status(400).json({ ok: false, message: "facebookUrl inválida o faltante" });
   }
   if (!token) {
-    return res.status(400).json({ ok: false, message: "No hay token de Apify configurado (ni en la petición ni en APIFY_TOKEN_DEFAULT)" });
+    return res.status(400).json({ ok: false, message: "No hay token de Apify configurado" });
   }
-  if (resultsLimit <= 0 || resultsLimit > 5000) {
-    return res.status(400).json({ ok: false, message: "resultsLimit debe ser 1..5000" });
+  if (!Number.isFinite(resultsLimit) || resultsLimit <= 0 || resultsLimit > 5000) {
+    return res.status(400).json({ ok: false, message: "resultsLimit debe ser entre 1 y 5000" });
   }
 
-  // Build actor input exactly as your actor expects
   const actorInput = {
     startUrls: [{ url: facebookUrl }],
-    resultsLimit: resultsLimit,
-    includeNestedComments: includeNestedComments,
-    viewOption: viewOption,
+    resultsLimit,
+    includeNestedComments,
+    viewOption,
   };
 
   console.log("➡ Sending to Apify actorId:", ACTOR_ID, "payload:", actorInput);
 
-  const runSyncUrl = `https://api.apify.com/v2/actors/${encodeURIComponent(ACTOR_ID)}/run-sync?token=${encodeURIComponent(token)}`;
+  const runSyncUrl = `https://api.apify.com/v2/acts/${encodeURIComponent(ACTOR_ID)}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`;
 
   try {
     const resp = await fetch(runSyncUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(actorInput),
-      // no credentials required
     });
 
     console.log("📡 Apify HTTP status:", resp.status);
 
-    const bodyText = await resp.text().catch(() => "");
+    const text = await resp.text().catch(() => "");
     let bodyJson = null;
-    try { bodyJson = bodyText ? JSON.parse(bodyText) : null; } catch (e) { /* not JSON */ }
+    try { bodyJson = text ? JSON.parse(text) : null; } catch(e) { /* ignore */ }
 
     if (!resp.ok) {
-      console.error("❌ Apify run-sync returned non-ok:", resp.status, bodyText);
+      console.error("❌ Apify run returned non-ok:", resp.status, text);
       return res.status(502).json({
         ok: false,
         message: "Error al ejecutar actor en Apify",
         status: resp.status,
-        apifyResponseText: bodyText,
+        apifyResponseText: text,
         apifyResponseJson: bodyJson,
       });
     }
 
-    // resp.ok -> bodyJson should contain output (items or dataset). Try to extract items.
+    // The run-sync-get-dataset-items returns dataset items (array) when successful
     let items = [];
-
-    // Common patterns:
-    //  - run-sync returns an array of items directly (bodyJson is array)
-    //  - or bodyJson.output or bodyJson.items
     if (Array.isArray(bodyJson)) items = bodyJson;
     else if (Array.isArray(bodyJson?.items)) items = bodyJson.items;
-    else if (Array.isArray(bodyJson?.output)) items = bodyJson.output;
     else if (Array.isArray(bodyJson?.result)) items = bodyJson.result;
-    // fallback: some actors put results in bodyJson.defaultDatasetId -> fetch dataset
-    else if (bodyJson?.defaultDatasetId || bodyJson?.data?.defaultDatasetId) {
-      const datasetId = bodyJson.defaultDatasetId || bodyJson.data.defaultDatasetId;
-      try {
-        const dsUrl = `https://api.apify.com/v2/datasets/${encodeURIComponent(datasetId)}/items?token=${encodeURIComponent(token)}&format=json&clean=true`;
-        console.log("➡ Fetching dataset items from:", dsUrl);
-        const dsResp = await fetch(dsUrl);
-        if (dsResp.ok) items = await dsResp.json();
-        else {
-          console.warn("⚠️ Could not fetch dataset items, status:", dsResp.status);
+    else if (Array.isArray(bodyJson?.data)) items = bodyJson.data;
+    else {
+      // If weird format, try to extract dataset via defaultDatasetId
+      const maybeDefaultDatasetId = bodyJson?.defaultDatasetId || bodyJson?.data?.defaultDatasetId;
+      if (maybeDefaultDatasetId) {
+        try {
+          const dsUrl = `https://api.apify.com/v2/datasets/${encodeURIComponent(maybeDefaultDatasetId)}/items?token=${encodeURIComponent(token)}&format=json&clean=true`;
+          console.log("➡ Fetching dataset fallback from:", dsUrl);
+          const dsResp = await fetch(dsUrl);
+          if (dsResp.ok) items = await dsResp.json();
+          else console.warn("⚠️ Dataset fetch failed status:", dsResp.status);
+        } catch (err) {
+          console.warn("⚠️ Error fetching dataset fallback:", err.message);
         }
-      } catch (err) {
-        console.warn("⚠️ Error fetching dataset items:", err.message);
       }
-    } else {
-      // As a last attempt, try bodyJson.data or bodyJson.output?.items
-      if (Array.isArray(bodyJson?.data)) items = bodyJson.data;
-      else if (Array.isArray(bodyJson?.output?.items)) items = bodyJson.output.items;
     }
 
     console.log("ℹ️ Items extracted count before limiting:", items.length);
 
-    // Limit server-side (Apify might return more)
+    // enforce server-side limit (Apify might ignore/more)
     const limited = items.slice(0, resultsLimit);
 
-    // Normalize items into the shape you provided
     const normalized = limited.map(it => normalizeItem(it, facebookUrl));
 
-    // Save in Mongo if connected (store full normalized)
+    // Save to Mongo if connected (store complete normalized)
     if (mongoConnected && commentsCollection) {
       try {
         await commentsCollection.insertOne({
           createdAt: new Date(),
-          facebookUrl,
           actorId: ACTOR_ID,
+          facebookUrl,
           actorInput,
           resultsLimit,
           includeNestedComments,
           viewOption,
-          rawItemsCount: items.length,
+          rawCount: items.length,
           normalized
         });
         console.log("💾 Saved results to Mongo");
@@ -223,7 +213,6 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
       console.log("⚠️ Mongo not connected, skipping DB write");
     }
 
-    // store last
     LAST_NORMALIZED = normalized;
 
     return res.json({ ok: true, normalized, rawCount: items.length });
@@ -234,7 +223,7 @@ app.post("/api/scrape", requireAuth, async (req, res) => {
   }
 });
 
-// -------------------- get latest --------------------
+// ---------- GET latest ----------
 app.get("/api/latest", requireAuth, async (req, res) => {
   if (mongoConnected && commentsCollection) {
     try {
@@ -249,7 +238,7 @@ app.get("/api/latest", requireAuth, async (req, res) => {
   return res.json({ ok: true, normalized: LAST_NORMALIZED, warning: "Mongo not connected" });
 });
 
-// -------------------- export CSV --------------------
+// ---------- export CSV ----------
 app.get("/api/export-csv", requireAuth, async (req, res) => {
   const rows = (mongoConnected && commentsCollection)
     ? (await commentsCollection.find().sort({ createdAt: -1 }).limit(1).toArray())?.[0]?.normalized ?? LAST_NORMALIZED
@@ -259,7 +248,6 @@ app.get("/api/export-csv", requireAuth, async (req, res) => {
     return res.status(404).send("No hay datos para exportar");
   }
 
-  // Build CSV manually and stream
   const header = ["postTitle", "text", "likesCount", "facebookUrl"];
   const escape = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
 
@@ -273,13 +261,12 @@ app.get("/api/export-csv", requireAuth, async (req, res) => {
   res.send(csv);
 });
 
-// -------------------- serve frontend fallback --------------------
+// ---------- serve frontend fallback ----------
 app.get("*", (req, res) => {
-  // let static middleware handle files first; fallback to index.html
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// -------------------- start --------------------
+// ---------- start ----------
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
