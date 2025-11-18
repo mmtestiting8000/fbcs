@@ -1,14 +1,8 @@
 const loginSection = document.getElementById('login-section');
 const scraperSection = document.getElementById('scraper-section');
-const loginBtn = document.getElementById('login-btn');
-const loginMsg = document.getElementById('login-msg');
-
-const scrapeBtn = document.getElementById('scrape-btn');
-const scrapeMsg = document.getElementById('scrape-msg');
-const exportBtn = document.getElementById('export-btn');
 const resultsTableBody = document.querySelector('#results-table tbody');
 
-loginBtn.addEventListener('click', async () => {
+document.getElementById('login-btn').addEventListener('click', async () => {
   const username = document.getElementById('username').value;
   const password = document.getElementById('password').value;
 
@@ -17,47 +11,50 @@ loginBtn.addEventListener('click', async () => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password })
   });
+
   const data = await res.json();
   if (data.ok) {
     loginSection.style.display = 'none';
     scraperSection.style.display = 'block';
     loadLatest();
   } else {
-    loginMsg.textContent = data.message || 'Error de login';
+    document.getElementById('login-msg').textContent = data.message;
   }
 });
 
-scrapeBtn.addEventListener('click', async () => {
-  scrapeMsg.textContent = '';
+document.getElementById('scrape-btn').addEventListener('click', async () => {
   const facebookUrl = document.getElementById('facebookUrl').value;
   const commentsCount = document.getElementById('commentsCount').value;
   const apifyToken = document.getElementById('apifyToken').value;
+
+  const msg = document.getElementById('scrape-msg');
+  msg.textContent = "Procesando scraper...";
 
   const res = await fetch('/api/scrape', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ facebookUrl, commentsCount, apifyToken })
   });
+
   const data = await res.json();
   if (data.ok) {
-    scrapeMsg.textContent = 'Scrape completado!';
+    msg.style.color = "green";
+    msg.textContent = "Scrape completado";
     renderTable(data.normalized);
   } else {
-    scrapeMsg.style.color = 'red';
-    scrapeMsg.textContent = data.message || 'Error al scrapear';
+    msg.style.color = "red";
+    msg.textContent = data.message;
   }
 });
 
-exportBtn.addEventListener('click', () => {
+document.getElementById('export-btn').addEventListener('click', () => {
   window.location.href = '/api/export-csv';
 });
 
 async function loadLatest() {
   const res = await fetch('/api/latest');
   const data = await res.json();
-  if (data.ok) {
-    renderTable(data.normalized);
-  }
+  if (data.ok) renderTable(data.normalized);
 }
 
 function renderTable(items) {
@@ -65,9 +62,9 @@ function renderTable(items) {
   items.forEach(it => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${it.postTitle || ''}</td>
-      <td>${it.text || ''}</td>
-      <td>${it.likesCount || 0}</td>
+      <td>${it.postTitle}</td>
+      <td>${it.text}</td>
+      <td>${it.likesCount}</td>
       <td><a href="${it.facebookUrl}" target="_blank">Link</a></td>
     `;
     resultsTableBody.appendChild(tr);
