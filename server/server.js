@@ -1,98 +1,161 @@
+// ---------------------------
+// IMPORTS
+// ---------------------------
+import express from "express";
+import cors from "cors";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+import { MongoClient } from "mongodb";
+import path from "path";
+import { fileURLToPath } from "url";
+
+dotenv.config();
+
+// ---------------------------
+// APP BASE
+// ---------------------------
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// ---------------------------
+// MONGO CONNECTION (con fallback)
+// ---------------------------
+let collection = null;
+let mongoConnected = false;
+
+async function connectDB() {
+    try {
+        const client = new MongoClient(process.env.MONGODB_URI);
+        await client.connect();
+        const db = client.db("fb-scraper");
+        collection = db.collection("results");
+        mongoConnected = true;
+        console.log("MongoDB conectado correctamente.");
+    } catch (err) {
+        console.error("⚠️ No se pudo conectar con MongoDB:", err.message);
+        mongoConnected = false;
+    }
+}
+
+await connectDB();
+
+// ---------------------------
+// VARIABLES EN MEMORIA
+// ---------------------------
+let LAST_DATA = [];
+
+// ---------------------------
+// SCRAPER ENDPOINT
+// ---------------------------
 app.post("/api/scrape", async (req, res) => {
-  const { facebookUrl, commentsCount, apifyToken } = req.body;
+    console.log("📥 /api/scrape llamado con:", req.body);
 
-  console.log("📌 /api/scrape ejecutado");
-  console.log("➡ URL:", facebookUrl);
-  console.log("➡ commentsCount:", commentsCount);
-  console.log("➡ Token recibido:", apifyToken ? "SÍ" : "NO");
-  console.log("➡ Token default en entorno:", process.env.APIFY_TOKEN_DEFAULT ? "SÍ" : "NO");
+    const { facebookUrl, commentsCount, apifyToken } = req.body;
+    const token = apifyToken || process.env.APIFY_TOKEN_DEFAULT;
 
-  try {
-    const tokenToUse = apifyToken || process.env.APIFY_TOKEN_DEFAULT;
-
-    if (!tokenToUse) {
-      console.log("❌ ERROR: No hay token de Apify disponible");
-      return res.json({ ok: false, message: "No token provided" });
+    if (!facebookUrl) {
+        return res.json({ ok: false, message: "Falta facebookUrl" });
     }
 
-    console.log("🔄 Iniciando ejecución del actor en Apify...");
+    try {
+        console.log("🔵 Ejecutando actor Apify con token:", token);
 
-    const actorPayload = {
-      runInput: {
-        startUrls: [{ url: facebookUrl }],
-        resultsLimit: parseInt(commentsCount) || 50
-      }
-    };
+        const run = await fetch(`https://api.apify.com/v2/actor-tasks/FB-COMMENTS-SCRAPER/run-sync?token=${token}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                startUrls: [{ url: facebookUrl }],
+                maxComments: Number(commentsCount) || 50
+            })
+        });
 
-    console.log("➡ Payload enviado al actor:", actorPayload);
+        console.log("📡 Respuesta Apify status:", run.status);
 
-    const actorResponse = await fetch("https://api.apify.com/v2/acts/apify~facebook-scraper/runs?token=" + tokenToUse, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(actorPayload)
+        if (!run.ok) {
+            const textErr = await run.text();
+            console.error("❌ Error completo de Apify:", textErr);
+            return res.json({
+                ok: false,
+                message: "Apify devolvió un error (ver logs en servidor)."
+            });
+        }
+
+        const apifyData = await run.json();
+        console.log("📦 Apify JSON recibido:", apifyData);
+
+        const items = apifyData?.data?.map?.(i => ({
+            postTitle: i?.postTitle || "",
+            text: i?.text || "",
+            likesCount: i?.likesCount || 0,
+            facebookUrl: i?.url || facebookUrl
+        })) || [];
+
+        LAST_DATA = items;
+
+        if (mongoConnected) {
+            await collection.insertOne({
+                createdAt: new Date(),
+                facebookUrl,
+                commentsCount,
+                results: items
+            });
+        } else {
+            console.log("⚠️ Mongo no conectado, guardando solo en memoria.");
+        }
+
+        return res.json({ ok: true, normalized: items });
+
+    } catch (err) {
+        console.error("🔥 ERROR EN SCRAPER:", err);
+        return res.json({ ok: false, message: "Error interno en el scraper." });
+    }
+});
+
+// ---------------------------
+// OBTENER ÚLTIMA EJECUCIÓN
+// ---------------------------
+app.get("/api/latest", async (req, res) => {
+    if (mongoConnected) {
+        const last = await collection
+            .find({})
+            .sort({ createdAt: -1 })
+            .limit(1)
+            .toArray();
+
+        if (last.length > 0) {
+            return res.json({ ok: true, normalized: last[0].results });
+        }
+    }
+
+    return res.json({ ok: true, normalized: LAST_DATA });
+});
+
+// ---------------------------
+// EXPORT CSV
+// ---------------------------
+app.get("/api/export-csv", (req, res) => {
+    let csv = "postTitle,text,likesCount,facebookUrl\n";
+
+    LAST_DATA.forEach(row => {
+        csv += `"${row.postTitle.replace(/"/g, "'")}","${row.text.replace(/"/g, "'")}",${row.likesCount},"${row.facebookUrl}"\n`;
     });
 
-    console.log("📥 Respuesta HTTP status:", actorResponse.status);
-
-    const actorData = await actorResponse.json();
-    console.log("📥 Respuesta completa del actor:", actorData);
-
-    if (!actorResponse.ok) {
-      console.error("❌ La API de Apify regresó error");
-      return res.json({ ok: false, message: actorData.error || "Error desconocido al iniciar actor" });
-    }
-
-    const runId = actorData.data.id;
-    console.log("✅ Actor iniciado correctamente, runId:", runId);
-
-    // Esperar a que finalice
-    let finished = false;
-    let runData = null;
-
-    console.log("🔄 Esperando que termine el actor...");
-
-    while (!finished) {
-      const runStatusRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${tokenToUse}`);
-      runData = await runStatusRes.json();
-      console.log("📡 Estado actor:", runData.data.status);
-
-      if (["SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"].includes(runData.data.status)) {
-        finished = true;
-      } else {
-        await new Promise(r => setTimeout(r, 5000));
-      }
-    }
-
-    if (runData.data.status !== "SUCCEEDED") {
-      console.log("❌ El actor terminó en estado:", runData.data.status);
-      return res.json({ ok: false, message: "El actor no terminó correctamente." });
-    }
-
-    console.log("✅ Actor terminó correctamente. Obteniendo dataset...");
-
-    const datasetId = runData.data.defaultDatasetId;
-    console.log("➡ Dataset ID:", datasetId);
-
-    const datasetRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?clean=true&format=json&token=${tokenToUse}`);
-    const dataset = await datasetRes.json();
-
-    console.log("📦 Datos obtenidos del dataset (primeros 3):", dataset.slice(0, 3));
-
-    const normalized = dataset.map(item => ({
-      postTitle: item?.post?.title || "",
-      text: item?.text || "",
-      likesCount: item?.likesCount || 0,
-      facebookUrl: item?.url || ""
-    }));
-
-    console.log("📌 Normalized (primeros 3):", normalized.slice(0, 3));
-
-    LAST_DATA = normalized;
-
-    return res.json({ ok: true, normalized });
-
-  } catch (err) {
-    console.error("🔥 ERROR CRÍTICO EN SCRAPER:", err);
-    return res.json({ ok: false, message: err.message || "Error inesperado" });
-  }
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=export.csv");
+    res.send(csv);
 });
+
+// ---------------------------
+// SERVIR FRONTEND
+// ---------------------------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(express.static(path.join(__dirname, "public")));
+
+// ---------------------------
+// PORT
+// ---------------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor iniciado en puerto", PORT));
