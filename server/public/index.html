@@ -1,49 +1,65 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FB Scraper</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    input, button { margin: 5px 0; padding: 5px; width: 100%; max-width: 400px; }
-    table { border-collapse: collapse; margin-top: 20px; width: 100%; max-width: 800px; }
-    th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
-  </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FB Comments Scraper</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h1>Facebook Comments Scraper</h1>
+  <main class="container">
+    <header>
+      <h1>FB Comments Scraper</h1>
+      <p class="muted">Introduce URL pública de un post de Facebook y extrae comentarios (Apify actor)</p>
+    </header>
 
-  <div id="login-section">
-    <h2>Login Admin</h2>
-    <input type="text" id="username" placeholder="Usuario">
-    <input type="password" id="password" placeholder="Contraseña">
-    <button id="login-btn">Login</button>
-    <p id="login-msg" style="color:red;"></p>
-  </div>
+    <section id="login-section" class="card">
+      <h2>Admin Login</h2>
+      <input id="username" placeholder="Usuario" />
+      <input id="password" placeholder="Contraseña" type="password" />
+      <div class="row">
+        <button id="login-btn" class="btn">Entrar</button>
+      </div>
+      <p id="login-msg" class="muted error"></p>
+    </section>
 
-  <div id="scraper-section" style="display:none;">
-    <h2>Ejecutar Scraper</h2>
-    <input type="text" id="facebookUrl" placeholder="Enlace de Facebook">
-    <input type="number" id="commentsCount" placeholder="Número de comentarios" value="50">
-    <input type="text" id="apifyToken" placeholder="Token Apify (opcional)">
-    <button id="scrape-btn">Scrapear</button>
-    <p id="scrape-msg" style="color:green;"></p>
+    <section id="scraper-section" class="card" style="display:none;">
+      <h2>Ejecutar Scraper</h2>
 
-    <h3>Última instancia</h3>
-    <button id="export-btn">Exportar CSV</button>
-    <table id="results-table">
-      <thead>
-        <tr>
-          <th>Post Title</th>
-          <th>Texto</th>
-          <th>Likes</th>
-          <th>Facebook URL</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
+      <label>Facebook post URL</label>
+      <input id="facebookUrl" placeholder="https://www.facebook.com/..." />
+
+      <label>Resultados a obtener (resultsLimit)</label>
+      <input id="resultsLimit" type="number" value="50" min="1" max="5000" />
+
+      <label><input id="includeNestedComments" type="checkbox" /> Incluir comentarios anidados</label>
+
+      <label>viewOption</label>
+      <select id="viewOption">
+        <option value="RANKED_UNFILTERED">RANKED_UNFILTERED</option>
+        <option value="CHRONOLOGICAL">CHRONOLOGICAL</option>
+        <option value="RANKED_FILTERED">RANKED_FILTERED</option>
+      </select>
+
+      <label>Token Apify (opcional — si lo dejas vacío se usará APIFY_TOKEN_DEFAULT)</label>
+      <input id="apifyToken" placeholder="apify_api_xxx..." />
+
+      <div class="row">
+        <button id="scrape-btn" class="btn primary">Scrapear</button>
+        <button id="export-btn" class="btn">Exportar CSV (último)</button>
+      </div>
+
+      <p id="scrape-msg" class="muted"></p>
+
+      <h3>Última instancia</h3>
+      <table id="results-table" class="table">
+        <thead>
+          <tr><th>Post Title</th><th>Texto</th><th>Likes</th><th>URL</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
 
   <script type="module" src="app.js"></script>
 </body>
