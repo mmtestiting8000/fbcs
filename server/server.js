@@ -71,9 +71,10 @@ function isValidHttpUrl(str) {
   }
 }
 
-// UPDATED: ahora incluye profileId, profileName y profileUrl
+// UPDATED: ahora incluye profilePicture
 function normalizeItem(i, fallbackUrl) {
   const profileId = i?.profileId ?? "";
+
   return {
     postTitle: i?.postTitle ?? "",
     text: i?.text ?? "",
@@ -81,6 +82,7 @@ function normalizeItem(i, fallbackUrl) {
     facebookUrl: i?.facebookUrl ?? fallbackUrl ?? "",
     profileId,
     profileName: i?.profileName ?? "",
+    profilePicture: i?.profilePicture ?? "",
     profileUrl: profileId ? `https://facebook.com/${profileId}` : "",
   };
 }
@@ -220,6 +222,7 @@ app.get("/api/export-csv", requireAuth, async (req, res) => {
     "profileName",
     "profileId",
     "profileUrl",
+    "profilePicture",
   ];
 
   const escape = (s) =>
@@ -235,6 +238,7 @@ app.get("/api/export-csv", requireAuth, async (req, res) => {
       escape(r.profileName),
       escape(r.profileId),
       escape(r.profileUrl),
+      escape(r.profilePicture),
     ].join(",") + "\n";
   }
 
