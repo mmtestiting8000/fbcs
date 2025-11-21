@@ -1,133 +1,96 @@
-// ui + validations + calls
 const loginSection = document.getElementById("login-section");
 const scraperSection = document.getElementById("scraper-section");
 const loginMsg = document.getElementById("login-msg");
 const scrapeMsg = document.getElementById("scrape-msg");
 const resultsTableBody = document.querySelector("#results-table tbody");
 
-// login
+// LOGIN
 document.getElementById("login-btn").addEventListener("click", async () => {
   loginMsg.textContent = "";
   const username = document.getElementById("username").value.trim();
   const password = document.getElementById("password").value;
 
-  if (!username || !password) {
-    loginMsg.textContent = "Usuario y contraseña requeridos";
-    return;
-  }
-
-  const res = await fetch("/api/login", {
+  const r = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
+  const j = await r.json();
 
-  const j = await res.json();
   if (j.ok) {
     loginSection.style.display = "none";
     scraperSection.style.display = "block";
     loadLatest();
-  } else {
-    loginMsg.textContent = j.message || "Error de login";
-  }
+  } else loginMsg.textContent = j.message;
 });
 
-// scrape
+// SCRAPE
 document.getElementById("scrape-btn").addEventListener("click", async () => {
-  scrapeMsg.style.color = "black";
-  scrapeMsg.textContent = "Iniciando...";
-  const facebookUrl = document.getElementById("facebookUrl").value.trim();
-  const resultsLimit = Number(document.getElementById("resultsLimit").value) || 50;
-  const includeNestedComments = document.getElementById("includeNestedComments").checked;
-  const viewOption = document.getElementById("viewOption").value;
-  const apifyToken = document.getElementById("apifyToken").value.trim();
+  scrapeMsg.textContent = "Procesando...";
+  const body = {
+    startUrls: [{ url: document.getElementById("facebookUrl").value.trim() }],
+    resultsLimit: Number(document.getElementById("resultsLimit").value) || 50,
+    includeNestedComments: document.getElementById("includeNestedComments").checked,
+    viewOption: document.getElementById("viewOption").value,
+    apifyToken: document.getElementById("apifyToken").value.trim(),
+  };
 
-  // basic validation
-  if (!facebookUrl) {
-    scrapeMsg.style.color = "red";
-    scrapeMsg.textContent = "Introduce la URL del post de Facebook.";
-    return;
-  }
-  if (!/^https?:\/\//i.test(facebookUrl)) {
-    scrapeMsg.style.color = "red";
-    scrapeMsg.textContent = "URL inválida (debe incluir http/https).";
-    return;
-  }
-  if (resultsLimit <= 0 || resultsLimit > 5000) {
-    scrapeMsg.style.color = "red";
-    scrapeMsg.textContent = "resultsLimit debe ser entre 1 y 5000.";
+  const resp = await fetch("/api/scrape", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  const data = await resp.json();
+  if (!data.ok) {
+    scrapeMsg.textContent = "Error: " + (data.message || "");
     return;
   }
 
-  try {
-    const body = {
-      startUrls: [{ url: facebookUrl }],
-      resultsLimit,
-      includeNestedComments,
-      viewOption,
-      apifyToken: apifyToken || undefined,
-    };
-
-    const resp = await fetch("/api/scrape", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const data = await resp.json();
-    if (data.ok) {
-      scrapeMsg.style.color = "green";
-      scrapeMsg.textContent = `Scrape completado — ${data.normalized?.length || 0} comentarios (raw: ${data.rawCount || "-"})`;
-      renderTable(data.normalized || []);
-    } else {
-      scrapeMsg.style.color = "red";
-      const msg = data.message || data.apifyResponseText || JSON.stringify(data.apifyResponseJson) || "Error al scrapear";
-      scrapeMsg.textContent = msg;
-      console.error("Scrape error:", data);
-    }
-  } catch (err) {
-    scrapeMsg.style.color = "red";
-    scrapeMsg.textContent = "Error de conexión: " + err.message;
-  }
+  scrapeMsg.textContent = "Listo — " + data.normalized.length;
+  renderTable(data.normalized);
 });
 
-// load latest
+// LOAD LATEST
 async function loadLatest() {
-  try {
-    const res = await fetch("/api/latest");
-    const j = await res.json();
-    if (j.ok) renderTable(j.normalized || []);
-  } catch (err) { console.warn("Error loading latest:", err); }
+  const r = await fetch("/api/latest");
+  const j = await r.json();
+  if (j.ok) renderTable(j.normalized);
 }
 
-// export CSV
+// CSV
 document.getElementById("export-btn").addEventListener("click", () => {
   window.location.href = "/api/export-csv";
 });
 
-// render
+// RENDER TABLE (UPDATED)
 function renderTable(items) {
   resultsTableBody.innerHTML = "";
-  if (!items || items.length === 0) {
-    resultsTableBody.innerHTML = "<tr><td colspan='4'>No hay datos</td></tr>";
+
+  if (!items.length) {
+    resultsTableBody.innerHTML = `<tr><td colspan="6">Sin datos</td></tr>`;
     return;
   }
 
-  items.forEach(it => {
+  items.forEach((it) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${escapeHtml(it.postTitle)}</td>
       <td>${escapeHtml(it.text)}</td>
       <td>${escapeHtml(it.likesCount)}</td>
-      <td><a href="${escapeAttr(it.facebookUrl)}" target="_blank">Abrir</a></td>
+      <td>${escapeHtml(it.profileName)}</td>
+      <td>${escapeHtml(it.profileId)}</td>
+      <td>
+        ${it.profileUrl ? `<a href="${escapeAttr(it.profileUrl)}" target="_blank">Perfil</a>` : ""}
+      </td>
     `;
     resultsTableBody.appendChild(tr);
   });
 }
 
 function escapeHtml(s) {
-  return String(s ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;");
 }
 function escapeAttr(s) {
-  return String(s ?? "").replace(/"/g, "%22");
+  return String(s).replace(/"/g, "%22");
 }
