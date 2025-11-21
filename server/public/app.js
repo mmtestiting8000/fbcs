@@ -68,7 +68,7 @@ function renderTable(items) {
   resultsTableBody.innerHTML = "";
 
   if (!items.length) {
-    resultsTableBody.innerHTML = `<tr><td colspan="6">Sin datos</td></tr>`;
+    resultsTableBody.innerHTML = `<tr><td colspan="7">Sin datos</td></tr>`;
     return;
   }
 
@@ -80,9 +80,8 @@ function renderTable(items) {
       <td>${escapeHtml(it.likesCount)}</td>
       <td>${escapeHtml(it.profileName)}</td>
       <td>${escapeHtml(it.profileId)}</td>
-      <td>
-        ${it.profileUrl ? `<a href="${escapeAttr(it.profileUrl)}" target="_blank">Perfil</a>` : ""}
-      </td>
+      <td>${it.profileUrl ? `<a href="${escapeAttr(it.profileUrl)}" target="_blank">Perfil</a>` : ""}</td>
+      <td>${it.profilePicture ? `<img src="${escapeAttr(it.profilePicture)}" width="40" height="40" style="border-radius:50%;">` : ""}</td>
     `;
     resultsTableBody.appendChild(tr);
   });
